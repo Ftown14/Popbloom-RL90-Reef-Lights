@@ -203,16 +203,15 @@ The `.uf2` file contains your WiFi password and encryption key. Don't share it.
 
 ### E1. Open the light and find the module
 
-1. **Unplug the light from mains power.**
-2. **Make sure the light is unplugged**
-3. The top plastic cover pops off by hand, revealing the fan and 4 screws in each corners. Remove only those 4 screws.
+1. **Make sure the light is unplugged**
+2. The top plastic cover pops off by hand, revealing the fan and 4 screws in each corners. Remove only those 4 screws.
    The lower housing and lens then come off and can be set aside.
 
    ![Top cover popped off by hand, showing the fan](images/Lid%20off.jpg)
 
    ![The 4 corner screws to remove, circled](images/screws.jpg)
 
-4. Find the **CBU module**: a small board soldered onto the control board, usually with "CBU" printed on the PCB just above its metal
+3. Find the **CBU module**: a small board soldered onto the control board, usually with "CBU" printed on the PCB just above its metal
    shield. It has small pins along its edges, numbered as in the Tuya datasheet (link in part A).
    - There are a few revisions of the board. I bought mine in 2023 and received a couple of replacement chipsets, so
      there may be newer ones than the examples below. As long as the module says **CBU**, you're fine. If it says
@@ -245,10 +244,10 @@ Count the pins **on the module itself**, using the datasheet. The photo shows wh
 | **16** | RX1 (module receives) | **TX** (TX on the SparkFun) |
 | **14** | 3V3 (power in) | **3V3** |
 | **13** | GND | **GND** |
-| **18** | CEN (reset) | Not connected. Leave this lead lose; you'll need to tap it to GND to reset the chip prior to the read/write. Additionally, you can skip soldering this and just do a power reset. Explained below|
+| **18** | CEN (reset) | Not connected. Leave this lead loose; you'll need to tap it to GND to reset the chip prior to the read/write. Additionally, you can skip soldering this and just do a power reset. Explained below|
 
 - TX and RX **cross over**: the module's transmit goes to the adapter's receive, and vice versa
-- **Ensure the adapter to 3.3 V** before plugging it in. The SparkFun Serial Basic has a voltage jumper (soldered).
+- **Ensure the adapter is set to 3.3 V** before plugging it in. The SparkFun Serial Basic has a voltage jumper (soldered).
 - **DO NOT PLUG THE LIGHT INTO ANYTHING OTHER THAN THE PROGRAMMER**. The adapter powers the module.
 
 The SparkFun Serial Basic's voltage jumper (arrow). It must be set to **3.3V**:
@@ -266,11 +265,11 @@ To be read or written, the chip has to be reset into its **download mode** while
 you only have to do this once per light.
 
 1. Plug the adapter into the PC and open **OpenIOTFlasher**.
-   - (Optional) **Easier** To put the adapter into Download mode. Pull the 3v3 wire out of the adapter and immediately plug it back in. Skip step 6 below        
+   - 1a (Optional but Easier) To put the adapter into Download mode. Pull the 3v3 wire out of the adapter and immediately plug it back in. Skip step 6 below        
 3. Select the adapter's **COM port** (from part B1).
 4. Select the platform **BK7231N** ("BK7231N (T2, T34, BL2028N)").
-5. Start a **backup (read only)**. The log shows **`Getting bus...`**: it's waiting for the chip.
-6. **(SKIP IF YOU DID 1A)**Now reset the chip:**
+5. Start a **backup (read only)**. If you skipped 1a then the adapter is waiting on download mode and the log shows **`Getting bus...`**: 
+6. **(SKIP IF YOU DID 1a)**Now reset the chip:**
    - **Tap the CEN lead to GND quickly.** This is finicky. It can take a few tries to get the timing right.
    - It should take about a second to see updates in the apps console if it worked, if not try again or:
    - **If CEN won't work:** pull the **3V3** lead out and put it back. OpenIOTFlasher will stop with an error saying
