@@ -266,17 +266,17 @@ To be read or written, the chip has to be reset into its **download mode** while
 you only have to do this once per light.
 
 1. Plug the adapter into the PC and open **OpenIOTFlasher**.
->1A. To put the adapter into Download without using the CEN to ground, just pull the 3v3 wire out of the adapter and plug it back in. That is it! Easier and more reliable.
-2. Select the adapter's **COM port** (from part B1).
-3. Select the platform **BK7231N** ("BK7231N (T2, T34, BL2028N)").
-4. Start a **backup (read only)**. The log shows **`Getting bus...`**: it's waiting for the chip.
-5. **(SKIP IF YOU DID 1A)**Now reset the chip:**
+   - To put the adapter into Download without using the CEN to ground, just pull the 3v3 wire out of the adapter and plug it back in. That is it!        Easier and more reliable.
+3. Select the adapter's **COM port** (from part B1).
+4. Select the platform **BK7231N** ("BK7231N (T2, T34, BL2028N)").
+5. Start a **backup (read only)**. The log shows **`Getting bus...`**: it's waiting for the chip.
+6. **(SKIP IF YOU DID 1A)**Now reset the chip:**
    - **Tap the CEN lead to GND quickly.** This is finicky. It can take a few tries to get the timing right.
    - It should take about a second to see updates in the apps console if it worked, if not try again or:
    - **If CEN won't work:** pull the **3V3** lead out and put it back. OpenIOTFlasher will stop with an error saying
      the **COM port disconnected**. That's expected. **Start the backup again** and it begins instantly, because the
      chip is now in download mode.
-6. Once it starts reading, leave everything alone until it finishes.
+7. Once it starts reading, leave everything alone until it finishes.
 
 ### E4. Back up the original firmware (twice)
 
