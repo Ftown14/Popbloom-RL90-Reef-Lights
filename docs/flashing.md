@@ -212,9 +212,11 @@ The `.uf2` file contains your WiFi password and encryption key. Don't share it.
 
 ### E2. Solder the wires
 
-Count the pins **on the module itself**, using the datasheet. The photo shows which pads to use on the CBU module:
+Count the pins **on the module itself**, using the datasheet. The photo shows which pads to use. On the right is the
+module's underside, where the pads are labelled. On the left are the same pads seen from the top, as the module sits
+on the control board, which is where you solder:
 
-![CBU module pads to solder: 13 GND, 14 3V3, 15 TX1, 16 RX1, 18 CEN](images/CBU%20Chip%20pads.jpg)
+![CBU module pads to solder: CEN, RX1, TX1, 3V3 and GND](images/CBU%20Chip%20pads.jpg)
 
 > ⚠️ The control board may have silkscreen labels like **`P15`/`P16`** nearby. Those are chip GPIO names, **not**
 > module pins 15 and 16. Soldering to them won't work.
@@ -338,7 +340,11 @@ light, and everything below applies to it.
 - **Settings:** light power, manual timeout, **Lunar cycle** and **Acclimation**. Each one's options appear when its
   switch is on.
 
-  ![Settings with Lunar cycle and Acclimation turned on](images/settingscard2.png)
+  ![Settings with Lunar cycle on and Acclimation off](images/settingscard.png)
+
+  With Acclimation turned on as well:
+
+  ![Settings with Lunar cycle and Acclimation turned on](images/settings2.png)
 
   - **Lunar cycle:** moonlight on White, Blue and Cyan. The max levels are at full moon, where 100% is 10% of the
     light's output. UV isn't used for moonlight.

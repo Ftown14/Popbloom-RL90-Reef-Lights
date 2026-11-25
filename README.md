@@ -22,7 +22,7 @@ stable.
 
 | Settings | Program editor |
 |---|---|
-| ![Settings with Lunar cycle and Acclimation on](docs/images/settingscard2.png) | ![Program editor](docs/images/editor.png) |
+| ![Settings with Lunar cycle and Acclimation on](docs/images/settings2.png) | ![Program editor](docs/images/editor.png) |
 | **Programs** | **Groups** |
 | ![Program picker](docs/images/programs.png) | ![Groups](docs/images/groups.png) |
 
@@ -121,6 +121,7 @@ Services (actions): `esphome.<node>_set_curve(hex)`, `esphome.<node>_set_lunar_l
 
 ## License
 
-See [License.md](License.md).
+[Prosperity Public License 3.0.0](LICENSE.md): free to use, change and share for noncommercial purposes,
+such as your own tank. Commercial use is limited to a 30-day trial.
 
 This project isn't affiliated with Popbloom, DSuny or Tuya.

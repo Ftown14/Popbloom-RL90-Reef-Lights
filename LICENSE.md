@@ -1,8 +1,8 @@
 # The Prosperity Public License 3.0.0
 
-Contributor: $name
+Contributor: Ftown14
 
-Source Code: $address
+Source Code: https://github.com/Ftown14/Popbloom-RL90-Reef-Lights
 
 ## Purpose
 
