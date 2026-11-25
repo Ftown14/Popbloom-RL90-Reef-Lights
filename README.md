@@ -103,7 +103,7 @@ Shown for a light named `reef_light_1`.
 |---|---|
 | `switch.reef_light_1_power` | Master on/off |
 | `sensor.reef_light_1_{white,uv,blue,cyanblue}` | Current output % per channel |
-| `sensor.reef_light_1_curve` | The stored program (hex, same format as Tuya DP 107). Write it with `esphome.reeflight_1_set_curve`. |
+| `sensor.reef_light_1_curve` | The stored program, as **hex** text. It's the same bytes as Tuya's DP 107, which Tuya sends as base64; this firmware uses hex only. Write it with `esphome.reeflight_1_set_curve(hex)`. |
 | `number.reef_light_1_{white,uv,blue,cyanblue}_level` | Manual sliders. Moving one turns on manual override. |
 | `switch.reef_light_1_manual_override` | Turn off to go back to the program. Also ends by itself after `number.reef_light_1_manual_timeout` minutes (default 5, 0 = never). |
 | `switch.reef_light_1_lunar_cycle` | Moonlight on/off |
