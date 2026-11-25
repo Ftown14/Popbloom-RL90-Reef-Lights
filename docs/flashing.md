@@ -207,11 +207,28 @@ The `.uf2` file contains your WiFi password and encryption key. Don't share it.
 2. **Make sure the light is unplugged**
 3. The top plastic cover pops off by hand, revealing the fan and 4 screws in each corners. Remove only those 4 screws.
    The lower housing and lens then come off and can be set aside.
+
+   ![Top cover popped off by hand, showing the fan](images/Lid%20off.jpg)
+
+   ![The 4 corner screws to remove, circled](images/screws.jpg)
+
 4. Find the **CBU module**: a small board soldered onto the control board, usually with "CBU" printed on the PCB just above its metal
    shield. It has small pins along its edges, numbered as in the Tuya datasheet (link in part A).
    - There are a few revisions of the board. I bought mine in 2023 and received a couple of replacement chipsets, so
      there may be newer ones than the examples below. As long as the module says **CBU**, you're fine. If it says
      anything else, this firmware hasn't been tested on it.
+
+   RL90 V1 board: the CBU module sits at the bottom of the control board (arrow), with the board version circled.
+
+   ![RL90 V1 control board](images/v1%20pcb.jpg)
+
+   Close-up of the CBU module on the V1 board:
+
+   ![CBU module on the V1 board](images/v1%20cbu.jpg)
+
+   RS Wi-Fi board V1.3: the CBU module is on a separate small board, with the version circled.
+
+   ![RS Wi-Fi board V1.3](images/v3%20pcb.jpg)
 
 ### E2. Solder the wires
 
@@ -233,6 +250,14 @@ Count the pins **on the module itself**, using the datasheet. The photo shows wh
 - TX and RX **cross over**: the module's transmit goes to the adapter's receive, and vice versa
 - **Ensure the adapter to 3.3 V** before plugging it in. The SparkFun Serial Basic has a voltage jumper (soldered).
 - **DO NOT PLUG THE LIGHT INTO ANYTHING OTHER THAN THE PROGRAMMER**. The adapter powers the module.
+
+The SparkFun Serial Basic's voltage jumper (arrow). It must be set to **3.3V**:
+
+![SparkFun Serial Basic 3.3V jumper](images/serial.jpg)
+
+Example of the wires soldered onto the CBU module (V1.3 board):
+
+![Wires soldered onto the CBU module](images/soldered.jpg)
 
 ### E3. Get the chip into download mode
 
