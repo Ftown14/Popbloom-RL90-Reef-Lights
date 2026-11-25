@@ -1,18 +1,18 @@
 # Converting a Popbloom RL90 reef light to ESPHome: complete guide
 
 This guide takes a stock Popbloom RL90 reef light (Popbloom/DSuny firmware, Tuya **CBU** module) and turns it into a light that
-runs **locally** with Home Assistant (HA), with no Tuya cloud. It assumes you've never done this before.
+runs **locally** with Home Assistant (HA), with no Tuya cloud. It assumes you've never done this before and provides full instructions. Please take your time and follow one step at a time to ensure nothing is missed. 
 
 **What you'll end up with:** each light stores its own daily program and runs it even if HA or WiFi is down. HA shows
-the light, and the reef light card lets you edit programs, use manual control and moonlight, and group lights per tank.
+the light, and the reef light card lets you edit programs, create groups, use manual control, and set moonlight and acclimation schedules.
 
-**What it takes:** about 1 hour for the first light, then about 20 minutes per light. You need basic soldering.
+**What it takes:** Depending on your level of knowledge with what steps need to be completed it can take 30 to 1 hour for the first light, then about 20 minutes per light. You need soldering knowledge or the use of clips (unconfirmed as I've never used them) to make the connection between the chip and the programmer.
 
 > ⚠️ **Read before starting**
-> - **Unplug the light from mains power** before opening it, and keep it unplugged while soldering and flashing.
+> - **UNPLUG THE LIGHT FROM THE POWER BRICK** before opening it, and keep it unplugged while soldering and flashing.
 >   The module is powered from the USB adapter instead.
 > - This firmware is written for lights where the CBU module drives the LEDs directly on pins **P8 (White), P7 (UV),
->   P6 (Blue), P26 (Cyan)**. A different board layout may need different pins (see Troubleshooting).
+>   P6 (Blue), P26 (Cyan)**. There are at least 2 versions of the PCB in the lights. Other than how they look, nothing changes on the cards themselves and where you need to connect to. 
 > - Back up the original firmware (part E). It's your only way back to stock.
 
 ---
@@ -65,9 +65,7 @@ Useful references:
 
 ## B. Install the software (once)
 
-1. **Install the CH340 driver.** Run the installer, then plug the adapter into the PC.
-   - **Check:** open Device Manager → **Ports (COM & LPT)**. You'll see **USB-SERIAL CH340 (COM*n*)**. Write down the
-     COM number.
+1. **Install the CH340 driver or equivalent.** Run the installer.
 2. **Install OpenIOTFlasher.** Unzip it to a folder, e.g. `C:\ReefFlash\OpenIOTFlasher`.
    - **Check:** double-click `OpenIOTFlasher.exe` and it opens. If Windows SmartScreen warns, click
      **More info → Run anyway**.
@@ -75,7 +73,7 @@ Useful references:
    **Install Now**.
    - **Check:** open a new PowerShell window and run `python --version`. It prints `Python 3.12.x` or newer.
 4. **Get this project** into a folder, e.g. `C:\ReefFlash\Popbloom-RL90-Reef-Lights`. Either download the ZIP and
-   unzip it there (rename the unzipped folder to `Popbloom-RL90-Reef-Lights` if it ends in `-main`), or:
+   unzip it there (rename the unzipped folder to `Popbloom-RL90-Reef-Lights` if it ends in `-main`), or pull the repo directly:
    ```powershell
    cd C:\ReefFlash
    git clone https://github.com/Ftown14/Popbloom-RL90-Reef-Lights.git
@@ -93,18 +91,18 @@ Useful references:
 
 ## C. Create your settings (once)
 
-The firmware needs a few private values. They go in a file called **`secrets.yaml`** in the `esphome` folder, so they
+The firmware needs a few private values, your Wi-Fi SSID and password. They go in a file called **`secrets.yaml`** in the `esphome` folder, so they
 never appear in the project's shared files. **Never share or upload `secrets.yaml`.** It's listed in `.gitignore`,
-so Git won't upload it by accident.
+so Git won't upload it to your repo by accident.
 
 ### C1. Generate an encryption key (`api_key`)
 
-The encryption key is a random password **you create yourself**. Nothing gives it to you. It:
+The encryption key is a random password **you create yourself**. 
 - encrypts all traffic between Home Assistant and the light, so nobody else on your network can read or control it;
 - is what HA asks for when you add the light ("Enter the encryption key");
 - is baked into the firmware when you build it.
 
-Use **one key for all your lights**. That way you only ever paste the same key into HA.
+**YOU ONLY NEED ONE** You can use the same key for ALL lights. This prevents confusion in trying to track which light gets which key.
 
 Generate one in PowerShell:
 ```powershell
@@ -118,22 +116,26 @@ It prints something like `k3J9…=` (44 characters, ending in `=`). Copy all of 
 ### C2. Choose a fallback hotspot password (`ap_password`)
 
 If a light can't join your WiFi (wrong password, router changed, out of range), it doesn't go dead. After about a
-minute it starts its **own WiFi hotspot**, called **"Reef Light N Setup"**, so you can fix it from a phone:
-1. Join "Reef Light N Setup" using **this password**.
-2. A setup page opens, or browse to http://192.168.4.1.
-3. Pick your WiFi network, enter its password, and the light reboots onto it.
+minute it starts its **own WiFi hotspot**, called **"Reef Light N Setup"**, so you can fix it from a phone instead of reflashing with the serial >adapter:
+
+**You do not need to accomplish these steps now. This is only for recovery if they don't connect to your Wi-Fi.**
+If you ever need to use it, these are the steps. 
+1. Join "Reef Light N Setup" using **this password** (the fallback hotspot).
+2. Browse to http://192.168.4.1.
+3. Pick the **2g** WiFi network you want the light to connect to, enter its password, and the light reboots onto it.
 
 The `ap_password` is just the password for that rescue hotspot. Pick anything **8 characters or longer** that you'll
-remember or can find. It isn't your WiFi password.
+remember. It is **NOT** your home Wi-Fi password.
 
 ### C3. Your WiFi name and password
-
-`wifi_ssid` is your WiFi network name, exactly as it appears (it's case-sensitive). `wifi_password` is its password.
-It must be a **2.4 GHz** network.
+This is the Wi-Fi you want your lights to connect to on your network (Must be 5g)
+`wifi_ssid` is your WiFi network name, exactly as it appears (it's case-sensitive). 
+`wifi_password` is the password.
+**It must be a **2.4 GHz** network.**
 
 ### C4. Create `secrets.yaml`
 
-In the project's `esphome` folder there's a template called **`secrets.example.yaml`**. Copy it to a file named
+In the project's `esphome` folder there's a template called **`secrets.example.yaml`**. Save a copy and name 
 **`secrets.yaml`** in the same folder:
 ```powershell
 cd C:\ReefFlash\Popbloom-RL90-Reef-Lights\esphome
@@ -166,7 +168,7 @@ Leave everything else in the file as it is.
 
 ## D. Build the firmware (per light)
 
-Each light gets its **own** firmware file containing its name. Number your lights 1, 2, 3, or however you like. Write the number on each light, and build one file per light.
+Each light gets its **own** firmware file containing its name. Number your lights 1, 2, 3, or however you like. Write the number on each light, and compile one file per light.
 
 | Light | Build with | Shows in HA as |
 |---|---|---|
@@ -202,9 +204,10 @@ The `.uf2` file contains your WiFi password and encryption key. Don't share it.
 ### E1. Open the light and find the module
 
 1. **Unplug the light from mains power.**
-2. The top plastic cover pops off by hand, revealing the fan and 4 screws in the corners. Remove only those 4 screws.
-   The lower housing and lens then come off.
-3. Find the **CBU module**: a small board soldered onto the control board, usually with "CBU" printed on its metal
+2. **Make sure the light is unplugged**
+3. The top plastic cover pops off by hand, revealing the fan and 4 screws in each corners. Remove only those 4 screws.
+   The lower housing and lens then come off and can be set aside.
+4. Find the **CBU module**: a small board soldered onto the control board, usually with "CBU" printed on the PCB just above its metal
    shield. It has small pins along its edges, numbered as in the Tuya datasheet (link in part A).
    - There are a few revisions of the board. I bought mine in 2023 and received a couple of replacement chipsets, so
      there may be newer ones than the examples below. As long as the module says **CBU**, you're fine. If it says
@@ -212,26 +215,24 @@ The `.uf2` file contains your WiFi password and encryption key. Don't share it.
 
 ### E2. Solder the wires
 
-Count the pins **on the module itself**, using the datasheet. The photo shows which pads to use. On the right is the
-module's underside, where the pads are labelled. On the left are the same pads seen from the top, as the module sits
-on the control board, which is where you solder:
+Count the pins **on the module itself**, using the datasheet. The photo shows which pads to use. On the right is the module's underside, where the pads are labelled. On the left are the same pads seen from the top (flipped 180), as the module sits on the control board, which is where you solder:
 
 ![CBU module pads to solder: CEN, RX1, TX1, 3V3 and GND](images/CBU%20Chip%20pads.jpg)
 
-> ⚠️ The control board may have silkscreen labels like **`P15`/`P16`** nearby. Those are chip GPIO names, **not**
+> ⚠️ The control board may have silkscreen labels like **`P15`/`P16`** nearby. Those are chip GPIO names, **not** the
 > module pins 15 and 16. Soldering to them won't work.
 
 | CBU module pin | Signal | Connect to adapter |
 |---|---|---|
-| **15** | TX1 (module transmits) | **RX** (RXI on the SparkFun) |
-| **16** | RX1 (module receives) | **TX** (TXO on the SparkFun) |
+| **15** | TX1 (module transmits) | **RX** (RX on the SparkFun) |
+| **16** | RX1 (module receives) | **TX** (TX on the SparkFun) |
 | **14** | 3V3 (power in) | **3V3** |
 | **13** | GND | **GND** |
-| **18** | CEN (reset) | Not connected. Leave this lead loose; you'll tap it to GND to reset the chip. |
+| **18** | CEN (reset) | Not connected. Leave this lead lose; you'll need to tap it to GND to reset the chip prior to the read/write. Additionally, you can skip soldering this and just do a power reset. Explained below|
 
-- TX and RX **cross over**: the module's transmit goes to the adapter's receive, and the other way round.
-- **Set the adapter to 3.3 V** before plugging it in. The SparkFun Serial Basic has a voltage switch.
-- Keep the light unplugged from mains. The adapter powers the module.
+- TX and RX **cross over**: the module's transmit goes to the adapter's receive, and vice versa
+- **Ensure the adapter to 3.3 V** before plugging it in. The SparkFun Serial Basic has a voltage jumper (soldered).
+- **DO NOT PLUG THE LIGHT INTO ANYTHING OTHER THAN THE PROGRAMMER**. The adapter powers the module.
 
 ### E3. Get the chip into download mode
 
@@ -240,20 +241,22 @@ To be read or written, the chip has to be reset into its **download mode** while
 you only have to do this once per light.
 
 1. Plug the adapter into the PC and open **OpenIOTFlasher**.
+1A. To put the adapter into Download without using the CEN to ground, just pull the 3v3 wire out of the adapter and plug it back in. That is it! Easier and more reliable.
 2. Select the adapter's **COM port** (from part B1).
 3. Select the platform **BK7231N** ("BK7231N (T2, T34, BL2028N)").
 4. Start a **backup (read only)**. The log shows **`Getting bus...`**: it's waiting for the chip.
-5. **Now reset the chip:**
-   - **Tap the CEN lead to GND briefly.** This is finicky. It can take a few tries to get the timing right.
-   - **If CEN won't work:** pull the **3V3** lead off and put it back. OpenIOTFlasher will stop with an error saying
+5. **(SKIP IF YOU DID 1A)**Now reset the chip:**
+   - **Tap the CEN lead to GND quickly.** This is finicky. It can take a few tries to get the timing right.
+   - It should take about a second to see updates in the apps console if it worked, if not try again or:
+   - **If CEN won't work:** pull the **3V3** lead out and put it back. OpenIOTFlasher will stop with an error saying
      the **COM port disconnected**. That's expected. **Start the backup again** and it begins instantly, because the
      chip is now in download mode.
 6. Once it starts reading, leave everything alone until it finishes.
 
 ### E4. Back up the original firmware (twice)
 
-The backup is a full copy of the stock (Popbloom/DSuny) firmware. It's the only way to return the light to stock.
-Making two and checking they're identical proves the read was clean.
+The backup is a full copy of the stock (Popbloom/DSuny) firmware. It's the only way to return the light to stock should you ever want to.
+Strongly recommend to make two and check that they are identical proves the read was clean and nothing was corrupted.
 
 1. The first backup from E3 finishes and is saved in OpenIOTFlasher's **`backups`** folder.
 2. **Start a second backup** without unplugging anything. It starts straight away.
@@ -264,44 +267,47 @@ Making two and checking they're identical proves the read was clean.
    ```
    - **The two Hash values must be identical.** If they're not, a wire is probably loose. Reflow the joints and back
      up again until two match.
-4. **Rename the good backup** after the light (e.g. `light-1-stock.bin`) and keep it somewhere safe.
+4. If they match rename one after the light (e.g. `light-1-stock.bin`) and keep it somewhere safe.
    It may contain your old Tuya WiFi details, so don't share it.
+5. You do not need to do this step for anymore remaining lights. 
 
 ### E5. Flash the new firmware
 
-1. Without unplugging anything, choose **this light's** file, e.g. `reeflight-1.uf2`, in OpenIOTFlasher.
+1. Without unplugging anything, choose the ESPHome firmware file for this specific light, e.g. `reeflight-1.uf2`, in OpenIOTFlasher.
    **Double-check the number.** If the file isn't listed, check it's in the `firmwares` folder (part D3) and restart
    OpenIOTFlasher.
 2. **Write the firmware (write only).** The chip is still in download mode from E3, so it starts right away.
-   If it waits at `Getting bus...` again, reset the chip as in E3 step 5.
 3. Wait until the write and verify finish without errors.
-4. Unplug the adapter from the PC, then **unsolder the leads** and close the light up.
+4. Leave everything plugged to the adapter to verify everything is working before you unplug.
 
 ---
 
 ## F. Add the light to Home Assistant (per light)
 
-1. **Plug the light into mains power.** Within about 30 seconds it boots, joins your WiFi and starts its default
-   daily program.
-   - If it can't join your WiFi, use the rescue hotspot after about a minute (see C2).
-2. In HA, go to **Settings → Devices & services**. Under **Discovered**, you'll see **ESPHome: reeflight-N**.
+1. In HA, go to **Settings → Devices & services**. Under **Discovered**, you'll see **ESPHome: reeflight-N**.
    Click **Add**.
    - Not shown? Click **+ Add integration → ESPHome** and type `reeflight-N.local`, or the light's IP from your
      router, with port `6053`.
-3. When asked for the **encryption key**, paste your `api_key` from C1.
-4. **Leave the area blank** and click **Finish**.
+   - If it can't join your WiFi, try to use the rescue hotspot after about a minute (see C2).
+2. When asked for the **encryption key**, paste your `api_key` from C1.
+3. **Leave the area blank** and click **Finish**. 
    - If you pick an area here, HA adds it to the front of every entity ID (e.g. `aquarium_reef_light_1_power`).
      That still works, but the names get long.
-5. **Then set the area:** open the new device, click the **pencil**, choose the area (e.g. Aquarium) and save.
-   The entity IDs stay as `reef_light_N_*`.
+5. (Optional) If you want to set a location **Then set the area:** open the new device, click the **pencil**, choose the area (e.g. Aquarium) and >save. The entity IDs stay as `reef_light_N_*`.
 6. **Check it:** the device page lists entities such as **Power**, **White/UV/Blue/CyanBlue**, **Curve**, **Manual
    override**, **Lunar cycle** and **Acclimation**. Its firmware version is shown under Device info.
 
+7. If all is good then unplug the adapter from the PC and the lights, then **unsolder/remove the leads**, close the light up and remount to tank.
+8. **Plug the light into power brick.** Within about 30 seconds it boots, joins your WiFi and starts its default
+   daily program.
+   
 ---
 
 ## G. Install the reef light card (once)
 
-The card gives you the program chart, editor, manual sliders, moonlight settings and tank groups.
+You can use this card as is, tweak it or make your own. It is up to you. 
+
+The card provides you the program chart, editor, manual sliders, groups, moonlight and acclimation settings. 
 
 1. **Copy the card file into HA.** Put `card/reef-light-card.js` from this project into HA's **`/config/www/`**
    folder (create `www` if it doesn't exist). Two easy ways:
@@ -335,7 +341,7 @@ The card gives you the program chart, editor, manual sliders, moonlight settings
 ### Using the card
 
 The card itself only displays. Click the **gear** to open Settings. The dropdown at the top picks a group or a single
-light, and everything below applies to it.
+light, and everything below applies to whatever is active on the drop down.
 
 - **Settings:** light power, manual timeout, **Lunar cycle** and **Acclimation**. Each one's options appear when its
   switch is on.
@@ -346,22 +352,20 @@ light, and everything below applies to it.
 
   ![Settings with Lunar cycle and Acclimation turned on](images/settings2.png)
 
-  - **Lunar cycle:** moonlight on White, Blue and Cyan. The max levels are at full moon, where 100% is 10% of the
-    light's output. UV isn't used for moonlight.
+  - **Lunar cycle:** moonlight on White, Blue and Cyan (editable). The max levels are the "full moon" setting. if set to 100% it will be actually >10% power (1/10th)of the light's max output. UV isn't used for moonlight.
   - **Acclimation:** for new corals or a new light. The whole program runs at the **Initial Intensity** on the day you
-    turn it on, rises a little at every midnight, and reaches 100% after the **Duration** in days. Then the switch turns
+    turn it on, increases at a set rate every night at midnight, and reaches 100% after the **Duration** in days. Then the switch turns
     itself off.
 - **Program editor:** drag points on the chart or type exact times and levels. **Save to lights** sends it to the
-  lights; **Save as program** keeps it in your list under a name.
+  lights; **Save as program** keeps it in your list under a name you provide.
 
   ![Program editor](images/editor.png)
 
-- **Programs:** the 16 built-in Tuya scenes and your saved programs. Pick one to apply it or open it in the editor.
+- **Programs:** the original 16 built-in Tuya scenes and your saved programs. Pick one to apply it or open it in the editor.
 
   ![Programs](images/programs.png)
 
-- **Manual control:** a slider per channel, e.g. for PAR testing. Closing it, or the manual timeout, goes back to the
-  program.
+- **Manual control:** one slider per channel. Useful for PAR testing. Closing it or after the automatic timeout (5-minute default) it returns to >the current program. This helps to prevent accidents if lights are left on at higher than desired intensities. 
 
 ---
 
