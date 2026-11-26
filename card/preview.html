@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{background:#2b2b2b;color:#eee;font-family:Roboto,sans-serif;margin:16px;--primary-color:#3a3a3a;--accent-color:#ff9800;--secondary-background-color:#c8c8c8;--divider-color:#444;--secondary-text-color:#e8b4c8;--primary-text-color:#f2f2f2;--card-background-color:#000;--text-primary-color:#fff}
+ha-card{display:block;background:#000;border-radius:12px;max-width:760px;margin-bottom:16px}</style></head><body>
+<script>customElements.define('ha-card',class extends HTMLElement{});</script>
+<script src="reef-light-card.js"></script>
+<div id="c"></div>
+<script>
+const curve='32101200000000130004000015000707031b0913170d1f1d232d31232736383c27394447472b46494f4d31495055583c494e54574338484d50461b3b434d49072f30284d00140c054f000a05005200000000';
+// Three mock lights: reef_light_1 is configured, 2 and 3 are found automatically. reef_light_3 starts with other settings.
+const st={'todo.reef_programs':{state:'0'}};
+const services={esphome:{}};
+for(const n of [1,2,3]){const B=`reef_light_${n}`;Object.assign(st,{[`sensor.${B}_curve`]:{state:curve,attributes:{friendly_name:`Reef Light ${n} Curve`}},[`switch.${B}_power`]:{state:'on'},[`switch.${B}_manual_override`]:{state:'off'},
+[`number.${B}_white_level`]:{state:'0'},[`number.${B}_uv_level`]:{state:'0'},[`number.${B}_blue_level`]:{state:'0'},[`number.${B}_cyanblue_level`]:{state:'0'},
+[`number.${B}_manual_timeout`]:{state:n===3?'10':'5'},[`switch.${B}_lunar_cycle`]:{state:'off'},[`select.${B}_lunar_sync`]:{state:'Location'},[`select.${B}_lunar_hours`]:{state:'Moon up'},
+[`time.${B}_lunar_start`]:{state:'20:30:00'},[`time.${B}_lunar_end`]:{state:'04:30:00'},[`number.${B}_lunar_duration`]:{state:'8'},
+[`number.${B}_lunar_white_max`]:{state:'0'},[`number.${B}_lunar_blue_max`]:{state:'20'},[`number.${B}_lunar_cyanblue_max`]:{state:'0'},
+[`switch.${B}_acclimation`]:{state:'off'},[`number.${B}_acclimation_initial_intensity`]:{state:'50'},[`number.${B}_acclimation_duration`]:{state:'30'},
+[`sensor.${B}_moon_illumination`]:{state:'93'},[`sensor.${B}_lunar_day`]:{state:'13'},[`sensor.${B}_moon_phase`]:{state:'Waxing Gibbous'},[`sensor.${B}_lunar_location`]:{state:'Home (HA): Bahay'},
+[`sensor.${B}_moon_altitude`]:{state:'37.4'},[`sensor.${B}_next_moonrise`]:{state:new Date(Date.now()+20*3600e3).toISOString()},[`sensor.${B}_next_moonset`]:{state:new Date(Date.now()+7*3600e3).toISOString()}});
+['white','uv','blue','cyanblue'].forEach(c=>st[`sensor.${B}_${c}`]={state:'0'});
+services.esphome[`reeflight_${n}_set_curve`]={};services.esphome[`reeflight_${n}_set_lunar_location`]={};services.esphome[`reeflight_${n}_set_acclimation_day`]={};}
+let todo=[];let uid=1;
+window._calls=[];window.st=st;
+const push=()=>setTimeout(()=>{for(const c of document.querySelectorAll('reef-light-card,reef-light-sliders-card')) c.hass={...hass,states:{...st}}},50);
+const baseOf=(id)=>id.replace(/^[a-z]+\./,'').match(/^(reef_light_\d+)/)[1];
+const hass={states:st,services,config:{latitude:32.78,longitude:-96.8,location_name:'Bahay'},
+ callWS:async(m)=>({items:todo.map(t=>({...t,status:'needs_action'}))}),
+ callService:async(d,s,data,target)=>{window._calls.push([d,s,data,target]);
+  if(d==='number'){st[data.entity_id]={state:String(data.value)}; if(data.entity_id.endsWith('_level')) st[`switch.${baseOf(data.entity_id)}_manual_override`]={state:'on'};}
+  if(d==='switch'){st[data.entity_id]={state:s==='turn_on'?'on':'off'};}
+  const acc=(B,on,day)=>{st[`switch.${B}_acclimation`]={state:on?'on':'off'};const i=+st[`number.${B}_acclimation_initial_intensity`].state,n=+st[`number.${B}_acclimation_duration`].state;st[`sensor.${B}_acclimation_day`]={state:on?String(day):'unknown'};st[`sensor.${B}_acclimation_level`]={state:on?String(Math.round((i+(100-i)*(day-1)/(n-1))*10)/10):'unknown'};};
+  if(d==='switch'&&data.entity_id.endsWith('_acclimation')) acc(baseOf(data.entity_id),s==='turn_on',1);
+  if(d==='select'){st[data.entity_id]={state:data.option};}
+  if(d==='time'){st[data.entity_id]={state:data.time};}
+  const node=d==='esphome'&&s.match(/^reeflight_(\d+)_/); const NB=node&&`reef_light_${node[1]}`;
+  if(node&&s.endsWith('set_curve')) st[`sensor.${NB}_curve`]={state:data.hex,attributes:st[`sensor.${NB}_curve`].attributes};
+  if(node&&s.endsWith('set_acclimation_day')) acc(NB,true,data.day);
+  if(node&&s.endsWith('set_lunar_location')) st[`sensor.${NB}_lunar_location`]={state:data.place};
+  if(d==='todo'&&s==='add_item') todo.push({uid:String(uid++),summary:data.item,description:data.description});
+  if(d==='todo'&&s==='update_item'){const t=todo.find(t=>t.uid===data.item); if(data.description!=null)t.description=data.description; if(data.rename)t.summary=data.rename;}
+  if(d==='todo'&&s==='remove_item') todo=todo.filter(t=>t.uid!==data.item);
+  push();}};
+window.hass=hass;window.push=push;
+const B='reef_light_1';
+const dev=[{name:'Reef Light 1',node:'reeflight_1',curve:`sensor.${B}_curve`,power:`switch.${B}_power`,channels:['white','uv','blue','cyanblue'].map(c=>`sensor.${B}_${c}`)}];
+try{localStorage.removeItem('reef-light-card-target')}catch(e){}
+const card=document.createElement('reef-light-card'); card.setConfig({title:'Reef Lights',devices:dev}); card.hass=hass; document.getElementById('c').appendChild(card);
+window.card=card;
+</script></body></html>

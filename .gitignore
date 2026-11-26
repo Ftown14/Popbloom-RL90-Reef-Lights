@@ -1,0 +1,32 @@
+# Your private settings: WiFi, hotspot password, encryption key. Never commit.
+secrets.yaml
+!esphome/secrets.example.yaml
+
+# ESPHome build output
+.esphome/
+build/
+.pioenvs/
+.piolibdeps/
+
+# Built firmware (contains your WiFi password and encryption key)
+*.uf2
+*.rbl
+*.bin
+
+# Stock firmware backups from OpenIOTFlasher (may contain your old Tuya WiFi details)
+backups/
+*.bak
+
+# Python virtual environment
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+.claude/

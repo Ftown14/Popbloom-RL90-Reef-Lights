@@ -1,0 +1,834 @@
+# Reef light: Tuya CBU (BK7231N) driving the 4 LED channels directly with PWM (no separate MCU).
+# The daily curve is stored on the light, which interpolates it itself, so the schedule keeps running
+# if HA or WiFi is down.
+#
+# Pin map (confirmed by testing): P8 White, P7 UV, P6 Blue, P26 CyanBlue. Higher duty = brighter.
+# One file for every light: set the name per light when compiling, e.g.
+#   esphome -s name reeflight-2 -s friendly_name "Reef Light 2" compile reeflight.yaml
+# See docs/flashing.md.
+
+substitutions:
+  name: reeflight-1
+  friendly_name: Reef Light 1
+  pwm_freq: 1000Hz
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  project:
+    name: ftown14.popbloom-rl90-reef-lights
+    version: "0.4.0"
+  includes:
+    - moon.h
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(publish_curve).execute();
+          id(publish_location).execute();
+          id(booted) = true;
+          id(lunar_calc).execute();
+          id(accl_calc).execute();
+
+bk72xx:
+  board: cbu
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_key
+  actions:
+    # Daily program, same format as Tuya DP 107: [0x32, N, N x (slot15min, W, UV, B, CB)]
+    - action: set_curve
+      variables:
+        hex: string
+      then:
+        - lambda: |-
+            std::vector<uint8_t> v;
+            for (size_t i = 0; i + 1 < hex.size(); i += 2)
+              v.push_back((uint8_t) strtol(hex.substr(i, 2).c_str(), nullptr, 16));
+            const size_t max_pts = (id(curve).size() - 2) / 5;
+            if (v.size() < 2 || v[1] < 2 || v[1] > max_pts || v.size() != 2 + 5 * (size_t) v[1]) {
+              ESP_LOGW("reeflight", "rejected curve (%u bytes)", (unsigned) v.size());
+              return;
+            }
+            for (int i = 1; i < v[1]; i++) {
+              if (v[2 + 5 * i] <= v[2 + 5 * (i - 1)] || v[2 + 5 * i] > 96) {
+                ESP_LOGW("reeflight", "rejected curve: times must increase");
+                return;
+              }
+            }
+            auto &c = id(curve);
+            c.fill(0);
+            for (size_t i = 0; i < v.size(); i++) c[i] = std::min<uint8_t>(v[i], i >= 2 && (i - 2) % 5 ? 100 : 255);
+            ESP_LOGI("reeflight", "new curve: %u points", v[1]);
+            id(publish_curve).execute();
+            id(apply_curve).execute();
+    # Location used by the lunar "Location" sync (phase from the real moon) and "Moon up" hours.
+    - action: set_lunar_location
+      variables:
+        lat: float
+        lon: float
+        place: string
+      then:
+        - lambda: |-
+            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+              ESP_LOGW("reeflight", "rejected lunar location %f,%f", lat, lon);
+              return;
+            }
+            id(lunar_lat) = lat;
+            id(lunar_lon) = lon;
+            auto &n = id(lunar_place);
+            n.fill(0);
+            for (size_t i = 0; i < place.size() && i < n.size() - 1; i++) n[i] = place[i];
+            id(lunar_has_loc) = true;
+            id(moon_times_dirty) = true;
+            ESP_LOGI("reeflight", "lunar location: %s (%.4f, %.4f)", n.data(), lat, lon);
+            id(publish_location).execute();
+            id(lunar_calc).execute();
+
+    # Group sync: put this light on the same acclimation day as another (day 1 = today).
+    - action: set_acclimation_day
+      variables:
+        day: int
+      then:
+        - lambda: |-
+            auto now_ = id(ha_time).now();
+            if (!now_.is_valid()) now_ = id(sntp_time).now();
+            const int32_t today = now_.is_valid() ? days_from_civil(now_.year, now_.month, now_.day_of_month) : -1;
+            if (today < 0 || day < 1) return;
+            id(accl_start_day) = today - (day - 1);
+            if (!id(acclimation).state) id(acclimation).turn_on();
+            id(accl_calc).execute();
+
+globals:
+  # Room for 32 points. Starts with the program captured from the stock firmware.
+  - id: curve
+    type: std::array<uint8_t, 162>
+    restore_value: true
+    initial_value: '{50, 16, 18, 0, 0, 0, 0, 19, 0, 4, 0, 0, 21, 0, 7, 7, 3, 27, 9, 19, 23, 13, 31, 29, 35, 45, 49, 35, 39, 54, 56, 60, 39, 57, 68, 71, 71, 43, 70, 73, 79, 77, 49, 73, 80, 85, 88, 60, 73, 78, 84, 87, 67, 56, 72, 77, 80, 70, 27, 59, 67, 77, 73, 7, 47, 48, 40, 77, 0, 20, 12, 5, 79, 0, 10, 5, 0, 82, 0, 0, 0, 0}'
+
+  - id: manual_levels
+    type: std::array<float, 4>
+    initial_value: '{-1, -1, -1, -1}'
+  - id: manual_since
+    type: uint32_t
+    initial_value: '0'
+  - id: level_cache
+    type: std::array<float, 4>
+    initial_value: '{0, 0, 0, 0}'
+  - id: booted
+    type: bool
+    initial_value: 'false'
+
+  # Lunar cycle
+  - id: lunar_epoch        # unix time of "day 1" for the Day 1 start sync
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  - id: lunar_lat
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: lunar_lon
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: lunar_has_loc
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: lunar_place
+    type: std::array<char, 64>
+    restore_value: true
+    initial_value: '{0}'
+  - id: moon_illum         # 0..1 for the phase source in use
+    type: float
+    initial_value: '0'
+  - id: moon_age           # days since new moon, 0..29.53
+    type: float
+    initial_value: '0'
+  - id: moon_alt           # degrees above the horizon at the lunar location (real moon)
+    type: float
+    initial_value: '-90'
+  - id: moon_times_dirty
+    type: bool
+    initial_value: 'true'
+  - id: lunar_fade         # 0..1: how much moonlight the hours setting allows right now
+    type: float
+    initial_value: '0'
+
+  # Acclimation: the program is scaled from the initial intensity on day 1 up to 100% on the last day.
+  - id: accl_start_day     # local day number (days since 1970-01-01) of day 1; 0 = not started
+    type: int32_t
+    restore_value: true
+    initial_value: '0'
+  - id: accl_scale         # 0..1 applied to the program; 1 when acclimation is off
+    type: float
+    initial_value: '1'
+
+script:
+  - id: set_manual_level
+    parameters:
+      ch: int
+      value: float
+    then:
+      - lambda: |-
+          if (!id(manual).state) {
+            // entering manual: start every channel from what's showing now
+            for (int k = 0; k < 4; k++) id(manual_levels)[k] = id(level_cache)[k];
+          }
+          id(manual_levels)[ch] = value;
+          number::Number *nums[4] = {id(n_white), id(n_uv), id(n_blue), id(n_cyan)};
+          nums[ch]->publish_state(value);
+          id(manual_since) = millis();
+          if (!id(manual).state) id(manual).turn_on();
+          else id(apply_curve).execute();
+  # Default location: HA's home (zone.home). Used until another place is picked, and followed while Home is picked.
+  - id: use_ha_home
+    then:
+      - lambda: |-
+          const float la = id(ha_home_lat).state, lo = id(ha_home_lon).state;
+          if (std::isnan(la) || std::isnan(lo)) return;
+          const bool following = !id(lunar_has_loc) || strncmp(id(lunar_place).data(), "Home (HA)", 9) == 0;
+          if (!following || (id(lunar_has_loc) && id(lunar_lat) == la && id(lunar_lon) == lo)) return;
+          id(lunar_lat) = la;
+          id(lunar_lon) = lo;
+          if (!id(lunar_has_loc)) {
+            auto &n = id(lunar_place);
+            n.fill(0);
+            strcpy(n.data(), "Home (HA)");
+          }
+          id(lunar_has_loc) = true;
+          id(moon_times_dirty) = true;
+          ESP_LOGI("reeflight", "lunar location from HA home: %.4f, %.4f", la, lo);
+          id(publish_location).execute();
+          id(lunar_calc).execute();
+  # Acclimation level for today. Runs every minute, so the step happens at local midnight.
+  - id: accl_calc
+    then:
+      - lambda: |-
+          if (!id(acclimation).state) {
+            id(accl_scale) = 1.0f;
+            if (!std::isnan(id(s_accl_day).state)) id(s_accl_day).publish_state(NAN);
+            if (!std::isnan(id(s_accl_level).state)) id(s_accl_level).publish_state(NAN);
+            return;
+          }
+          auto now_ = id(ha_time).now();
+          if (!now_.is_valid()) now_ = id(sntp_time).now();
+          const int32_t today = now_.is_valid() ? days_from_civil(now_.year, now_.month, now_.day_of_month) : -1;
+          if (today < 0) return;  // no time yet: keep the last level
+          if (id(accl_start_day) <= 0) id(accl_start_day) = today;
+          const int days = std::max(2, (int) id(accl_days).state);
+          const float init = std::min(100.0f, std::max(1.0f, id(accl_init).state));
+          const int d = today - id(accl_start_day) + 1;
+          if (d > days) {
+            ESP_LOGI("reeflight", "acclimation finished after %d days", days);
+            id(acclimation).turn_off();
+            return;
+          }
+          const int dd = std::max(1, d);
+          const float pct = init + (100.0f - init) * (float) (dd - 1) / (float) (days - 1);
+          id(accl_scale) = pct / 100.0f;
+          if (id(s_accl_day).state != dd) id(s_accl_day).publish_state(dd);
+          const float r = roundf(pct * 10.0f) / 10.0f;
+          if (id(s_accl_level).state != r) id(s_accl_level).publish_state(r);
+  - id: publish_location
+    then:
+      - lambda: |-
+          id(lunar_location_text).publish_state(id(lunar_has_loc) ? std::string(id(lunar_place).data()) : std::string("Not set"));
+  # Moon phase and position, recomputed every minute. Low-precision ephemeris (Astronomical Almanac):
+  # about 0.3 degrees for the moon, which is plenty for phase and moonrise/moonset.
+  - id: lunar_calc
+    then:
+      - lambda: |-
+          auto now = id(ha_time).now();
+          if (!now.is_valid()) now = id(sntp_time).now();
+          if (!now.is_valid()) return;
+          const double SYN = 29.530588853;
+          const double unix_t = (double) now.timestamp;
+          const MoonPos mp = moon_pos(unix_t, id(lunar_lat), id(lunar_lon));
+          id(moon_alt) = mp.alt;
+          double illum = mp.illum;
+          double age = mp.elong / 360.0 * SYN;
+          const bool location = id(lunar_sync).active_index().value_or(0) == 1 && id(lunar_has_loc);
+          if (!location) {
+            // Day 1 start: our own cycle counted from when lunar was turned on (day 1 = new moon).
+            if (id(lunar_epoch) == 0) id(lunar_epoch) = (uint32_t) now.timestamp;
+            age = fmod((unix_t - (double) id(lunar_epoch)) / 86400.0, SYN);
+            if (age < 0) age = 0;
+            illum = (1.0 - cos(2.0 * M_PI * age / SYN)) / 2.0;
+          }
+          id(moon_age) = age;
+          id(moon_illum) = illum;
+          // Hours: 0 = moon up (real moonrise..moonset), 1 = time window, 2 = start + duration.
+          const int mode = id(lunar_hours).active_index().value_or(0);
+          const float m = now.hour * 60 + now.minute;
+          float fade = 1.0f;
+          if (mode == 0) {
+            // Real moon: needs a location. Fades in over the first 3 degrees above the horizon.
+            if (location) fade = std::min(1.0f, std::max(0.0f, (id(moon_alt) - 0.125f) / 3.0f));
+          } else {
+            const float s = id(lunar_start).hour * 60 + id(lunar_start).minute;
+            float e = mode == 1 ? id(lunar_end).hour * 60 + id(lunar_end).minute : s + id(lunar_duration).state * 60.0f;
+            float len = fmodf(e - s + 1440.0f, 1440.0f);
+            if (len == 0 && mode == 2 && id(lunar_duration).state >= 24) len = 1440;
+            const float into = fmodf(m - s + 1440.0f, 1440.0f);
+            if (len > 0 && into < len) fade = std::min(1.0f, std::min(into + 1, len - into) / 10.0f);  // 10 min fades
+            else fade = (len == 0 && mode == 1) ? 1.0f : 0.0f;
+          }
+          id(lunar_fade) = fade;
+          static const char *names[8] = {"New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
+                                         "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent"};
+          const int idx = ((int) floor(age / SYN * 8.0 + 0.5)) % 8;
+          if (id(moon_phase_text).state != names[idx]) id(moon_phase_text).publish_state(names[idx]);
+          const float il = roundf(illum * 100.0f), dy = floorf(age) + 1;
+          if (std::isnan(id(s_illum).state) || id(s_illum).state != il) id(s_illum).publish_state(il);
+          if (std::isnan(id(s_day).state) || id(s_day).state != dy) id(s_day).publish_state(dy);
+          const float al = id(lunar_has_loc) ? roundf(mp.alt * 10.0f) / 10.0f : NAN;
+          if (std::isnan(al) != std::isnan(id(s_alt).state) || (!std::isnan(al) && al != id(s_alt).state)) id(s_alt).publish_state(al);
+          // Next moonrise/moonset at the location: every 10 min, after a location change, or once one has passed.
+          static uint32_t times_at = 0;
+          const uint32_t ts = (uint32_t) now.timestamp;
+          static uint32_t nr = 0, ns = 0;
+          auto iso = [](double t) -> std::string {
+            if (std::isnan(t)) return "unknown";
+            time_t tt = (time_t) t;
+            struct tm g;
+            gmtime_r(&tt, &g);
+            char b[32];
+            strftime(b, sizeof(b), "%Y-%m-%dT%H:%M:%S+00:00", &g);
+            return b;
+          };
+          if (!id(lunar_has_loc)) {
+            nr = ns = 0;
+            if (id(s_rise).state != "unknown") id(s_rise).publish_state("unknown");
+            if (id(s_set).state != "unknown") id(s_set).publish_state("unknown");
+          } else if (id(moon_times_dirty) || ts - times_at >= 600 || (nr && ts >= nr) || (ns && ts >= ns)) {
+            id(moon_times_dirty) = false;
+            times_at = ts;
+            double rise, set;
+            moon_next_events(unix_t, id(lunar_lat), id(lunar_lon), rise, set);
+            nr = std::isnan(rise) ? 0 : (uint32_t) rise;
+            ns = std::isnan(set) ? 0 : (uint32_t) set;
+            id(s_rise).publish_state(iso(rise));
+            id(s_set).publish_state(iso(set));
+          }
+  - id: publish_curve
+    then:
+      - lambda: |-
+          auto &c = id(curve);
+          size_t len = 2 + 5 * (size_t) c[1];
+          if (len > c.size()) len = c.size();
+          id(curve_text).publish_state(format_hex(c.data(), len));
+  # Interpolates the curve for the current time and sets the 4 channels.
+  - id: apply_curve
+    then:
+      - lambda: |-
+          auto &c = id(curve);
+          const int n = c[1];
+          auto now = id(ha_time).now();
+          if (!now.is_valid()) now = id(sntp_time).now();
+          float v[4] = {0, 0, 0, 0};
+          if (now.is_valid() && n >= 1) {
+            const float m = now.hour * 60 + now.minute + now.second / 60.0f;
+            auto t = [&](int i) { return c[2 + 5 * i] * 15.0f; };
+            auto val = [&](int i, int k) { return (float) c[3 + 5 * i + k]; };
+            if (m <= t(0)) {
+              for (int k = 0; k < 4; k++) v[k] = val(0, k);
+            } else if (m >= t(n - 1)) {
+              for (int k = 0; k < 4; k++) v[k] = val(n - 1, k);
+            } else {
+              for (int i = 0; i < n - 1; i++) {
+                if (m >= t(i) && m <= t(i + 1)) {
+                  const float span = t(i + 1) - t(i);
+                  const float f = span > 0 ? (m - t(i)) / span : 0;
+                  for (int k = 0; k < 4; k++) v[k] = val(i, k) + (val(i + 1, k) - val(i, k)) * f;
+                  break;
+                }
+              }
+            }
+          }
+          // Acclimation: the whole program runs at today's acclimation level.
+          if (id(acclimation).state) for (int k = 0; k < 4; k++) v[k] *= id(accl_scale);
+          // Lunar: each lunar channel shows whichever is higher, the program or its moonlight level.
+          // So they follow the schedule down, then hold at the moon level while other channels go to 0.
+          // A lunar setting of 100% is 10% output. UV is never used for moonlight.
+          if (id(lunar).state && id(lunar_fade) > 0) {
+            number::Number *mx[4] = {id(lunar_white_max), nullptr, id(lunar_blue_max), id(lunar_cyan_max)};
+            for (int k = 0; k < 4; k++) {
+              if (mx[k] == nullptr) continue;
+              const float lv = mx[k]->state * 0.1f * id(moon_illum) * id(lunar_fade);
+              if (!std::isnan(lv) && lv > v[k]) v[k] = lv;
+            }
+          }
+          // Manual override (sliders): hold the slider levels until it's turned off or times out.
+          if (id(manual).state) {
+            const float tmo = id(manual_timeout).state;
+            if (tmo > 0 && millis() - id(manual_since) > (uint32_t) (tmo * 60000.0f)) {
+              ESP_LOGI("reeflight", "manual override timed out, resuming program");
+              id(manual).turn_off();
+            } else {
+              for (int k = 0; k < 4; k++) v[k] = id(manual_levels)[k];
+            }
+          }
+          const bool on = id(power).state;
+          // At exactly 0% LibreTiny disables the PWM unit and leaves the pin undriven, and this
+          // board's LED drivers then float to full on. So 0% drives the pin as a GPIO held LOW (true off).
+          static float last[4] = {-1, -1, -1, -1};
+          output::FloatOutput *outs[4] = {id(o_white), id(o_uv), id(o_blue), id(o_cyan)};
+          const uint8_t pins[4] = {8, 7, 6, 26};
+          for (int k = 0; k < 4; k++) {
+            float lvl = on ? v[k] / 100.0f : 0.0f;
+            if (lvl < 0.0005f) lvl = 0.0f;
+            if (lvl == last[k]) continue;
+            last[k] = lvl;
+            outs[k]->set_level(lvl);
+            if (lvl == 0.0f) {
+              pinMode(pins[k], OUTPUT);
+              digitalWrite(pins[k], LOW);
+            }
+          }
+          id(level_cache)[0] = on ? v[0] : 0;
+          id(level_cache)[1] = on ? v[1] : 0;
+          id(level_cache)[2] = on ? v[2] : 0;
+          id(level_cache)[3] = on ? v[3] : 0;
+          // Keep the sliders showing the live program levels while not in manual mode.
+          if (!id(manual).state) {
+            number::Number *nums[4] = {id(n_white), id(n_uv), id(n_blue), id(n_cyan)};
+            for (int k = 0; k < 4; k++) {
+              const float r = roundf(v[k] * 2.0f) / 2.0f;
+              if (std::isnan(nums[k]->state) || fabsf(nums[k]->state - r) >= 0.5f) nums[k]->publish_state(r);
+            }
+          }
+
+interval:
+  # Fine steps: the device recomputes every second, so fades are smooth (Tuya stepped 1% at a time).
+  - interval: 1s
+    then:
+      - lambda: 'id(apply_curve).execute();'
+  - interval: 60s
+    then:
+      - lambda: |-
+          id(lunar_calc).execute();
+          id(accl_calc).execute();
+
+ota:
+  - platform: esphome  # secured with the API encryption key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${friendly_name} Setup"
+    password: !secret ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+
+time:
+  - platform: homeassistant
+    id: ha_time
+    timezone: America/Chicago
+  - platform: sntp
+    id: sntp_time
+    timezone: America/Chicago
+
+output:
+  # max_power stays just under 100%: an exact 100% duty glitched during pin testing.
+  # A level of 0 is handled in apply_curve (pin held LOW).
+  - platform: libretiny_pwm
+    id: o_white
+    pin: P8
+    frequency: ${pwm_freq}
+    max_power: 0.995
+  - platform: libretiny_pwm
+    id: o_uv
+    pin: P7
+    frequency: ${pwm_freq}
+    max_power: 0.995
+  - platform: libretiny_pwm
+    id: o_blue
+    pin: P6
+    frequency: ${pwm_freq}
+    max_power: 0.995
+  - platform: libretiny_pwm
+    id: o_cyan
+    pin: P26
+    frequency: ${pwm_freq}
+    max_power: 0.995
+
+number:
+  # Channel sliders. Moving one turns on Manual Override; turning that off resumes the program.
+  - platform: template
+    id: n_white
+    name: White Level
+    icon: mdi:white-balance-sunny
+    min_value: 0
+    max_value: 100
+    step: 0.5
+    unit_of_measurement: "%"
+    mode: slider
+    set_action:
+      - lambda: 'id(set_manual_level).execute(0, x);'
+  - platform: template
+    id: n_uv
+    name: UV Level
+    icon: mdi:weather-sunny-alert
+    min_value: 0
+    max_value: 100
+    step: 0.5
+    unit_of_measurement: "%"
+    mode: slider
+    set_action:
+      - lambda: 'id(set_manual_level).execute(1, x);'
+  - platform: template
+    id: n_blue
+    name: Blue Level
+    icon: mdi:water
+    min_value: 0
+    max_value: 100
+    step: 0.5
+    unit_of_measurement: "%"
+    mode: slider
+    set_action:
+      - lambda: 'id(set_manual_level).execute(2, x);'
+  - platform: template
+    id: n_cyan
+    name: CyanBlue Level
+    icon: mdi:waves
+    min_value: 0
+    max_value: 100
+    step: 0.5
+    unit_of_measurement: "%"
+    mode: slider
+    set_action:
+      - lambda: 'id(set_manual_level).execute(3, x);'
+  # Safety net: manual mode ends by itself after this many minutes (0 = never).
+  - platform: template
+    id: manual_timeout
+    name: Manual Timeout
+    icon: mdi:timer-sand
+    entity_category: config
+    min_value: 0
+    max_value: 720
+    step: 5
+    unit_of_measurement: min
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 5
+  # Lunar settings. The channel maxes are % of the moonlight range: 100% = 10% output. UV isn't used.
+  - platform: template
+    id: lunar_duration
+    name: Lunar Duration
+    icon: mdi:timer-outline
+    entity_category: config
+    min_value: 0.5
+    max_value: 24
+    step: 0.5
+    unit_of_measurement: h
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 8
+    on_value:
+      - lambda: 'id(lunar_calc).execute();'
+  - platform: template
+    id: lunar_white_max
+    name: Lunar White Max
+    icon: mdi:moon-full
+    entity_category: config
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  - platform: template
+    id: lunar_blue_max
+    name: Lunar Blue Max
+    icon: mdi:moon-full
+    entity_category: config
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 20
+  - platform: template
+    id: lunar_cyan_max
+    name: Lunar CyanBlue Max
+    icon: mdi:moon-full
+    entity_category: config
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+  # Acclimation
+  - platform: template
+    id: accl_init
+    name: Acclimation Initial Intensity
+    icon: mdi:brightness-percent
+    entity_category: config
+    min_value: 1
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    on_value:
+      - lambda: 'id(accl_calc).execute();'
+  - platform: template
+    id: accl_days
+    name: Acclimation Duration
+    icon: mdi:calendar-range
+    entity_category: config
+    min_value: 2
+    max_value: 99
+    step: 1
+    unit_of_measurement: d
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 30
+    on_value:
+      - lambda: 'id(accl_calc).execute();'
+
+select:
+  - platform: template
+    id: lunar_sync
+    name: Lunar Sync
+    icon: mdi:sync
+    entity_category: config
+    options: ["Day 1 start", "Location"]
+    initial_option: "Location"
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: |-
+          // Picking "Day 1 start" (after boot) restarts the cycle at day 1.
+          if (id(booted) && i == 0) id(lunar_epoch) = 0;
+          id(lunar_calc).execute();
+  - platform: template
+    id: lunar_hours
+    name: Lunar Hours
+    icon: mdi:clock-outline
+    entity_category: config
+    options: ["Moon up", "Time window", "Duration"]
+    initial_option: "Moon up"
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: 'id(lunar_calc).execute();'
+
+datetime:
+  - platform: template
+    id: lunar_start
+    name: Lunar Start
+    type: time
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: "20:30:00"
+    on_value:
+      - lambda: 'id(lunar_calc).execute();'
+  - platform: template
+    id: lunar_end
+    name: Lunar End
+    type: time
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: "04:30:00"
+    on_value:
+      - lambda: 'id(lunar_calc).execute();'
+
+switch:
+  - platform: template
+    id: manual
+    name: Manual Override
+    icon: mdi:tune-vertical
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      - lambda: |-
+          id(manual_since) = millis();
+          for (int k = 0; k < 4; k++) {
+            const float cur = id(level_cache)[k];
+            if (id(manual_levels)[k] < 0) id(manual_levels)[k] = cur;
+          }
+          id(apply_curve).execute();
+    on_turn_off:
+      - lambda: |-
+          for (int k = 0; k < 4; k++) id(manual_levels)[k] = -1;
+          id(apply_curve).execute();
+  - platform: template
+    id: lunar
+    name: Lunar Cycle
+    icon: mdi:moon-waxing-crescent
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - lambda: |-
+          // Turning lunar on starts the Day 1 cycle (a restore at boot keeps the old start).
+          if (id(booted)) id(lunar_epoch) = 0;
+          id(lunar_calc).execute();
+    on_turn_off:
+      - lambda: 'id(apply_curve).execute();'
+  - platform: template
+    id: acclimation
+    name: Acclimation
+    icon: mdi:chart-line-variant
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - lambda: |-
+          // Turning it on starts at day 1 today (a restore at boot keeps the old start).
+          if (id(booted)) id(accl_start_day) = 0;
+          id(accl_calc).execute();
+          id(apply_curve).execute();
+    on_turn_off:
+      - lambda: |-
+          id(accl_start_day) = 0;
+          id(accl_calc).execute();
+          id(apply_curve).execute();
+  - platform: template
+    id: power
+    name: Power
+    icon: mdi:lightbulb-group
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - lambda: 'id(apply_curve).execute();'
+    on_turn_off:
+      - lambda: 'id(apply_curve).execute();'
+
+sensor:
+  - platform: template
+    name: White
+    unit_of_measurement: "%"
+    icon: mdi:white-balance-sunny
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(level_cache)[0];'
+  - platform: template
+    name: UV
+    unit_of_measurement: "%"
+    icon: mdi:weather-sunny-alert
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(level_cache)[1];'
+  - platform: template
+    name: Blue
+    unit_of_measurement: "%"
+    icon: mdi:water
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(level_cache)[2];'
+  - platform: template
+    name: CyanBlue
+    unit_of_measurement: "%"
+    icon: mdi:waves
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(level_cache)[3];'
+  # Published by lunar_calc right away (every minute and whenever a lunar setting changes).
+  - platform: template
+    id: s_illum
+    name: Moon Illumination
+    unit_of_measurement: "%"
+    icon: mdi:moon-full
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: homeassistant
+    id: ha_home_lat
+    entity_id: zone.home
+    attribute: latitude
+    internal: true
+    on_value:
+      - lambda: 'id(use_ha_home).execute();'
+  - platform: homeassistant
+    id: ha_home_lon
+    entity_id: zone.home
+    attribute: longitude
+    internal: true
+    on_value:
+      - lambda: 'id(use_ha_home).execute();'
+  - platform: template
+    id: s_day
+    name: Lunar Day
+    icon: mdi:calendar-today
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: s_accl_day
+    name: Acclimation Day
+    icon: mdi:calendar-today
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: s_accl_level
+    name: Acclimation Level
+    unit_of_measurement: "%"
+    icon: mdi:brightness-percent
+    accuracy_decimals: 1
+    update_interval: never
+  - platform: template
+    id: s_alt
+    name: Moon Altitude
+    unit_of_measurement: "°"
+    icon: mdi:angle-acute
+    entity_category: diagnostic
+    accuracy_decimals: 1
+    update_interval: never
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s
+  - platform: uptime
+    name: Uptime
+
+text_sensor:
+  - platform: template
+    id: curve_text
+    name: Curve
+    icon: mdi:chart-bell-curve
+  - platform: template
+    id: moon_phase_text
+    name: Moon Phase
+    icon: mdi:moon-waning-gibbous
+  - platform: template
+    id: s_rise
+    name: Next Moonrise
+    device_class: timestamp
+    icon: mdi:weather-moonset-up
+  - platform: template
+    id: s_set
+    name: Next Moonset
+    device_class: timestamp
+    icon: mdi:weather-moonset-down
+  - platform: template
+    id: lunar_location_text
+    name: Lunar Location
+    icon: mdi:map-marker
+    entity_category: diagnostic
+  - platform: version
+    name: ESPHome Version
+
+button:
+  - platform: restart
+    name: Restart
