@@ -265,11 +265,12 @@ To be read or written, the chip has to be reset into its **download mode** while
 you only have to do this once per light.
 
 1. Plug the adapter into the PC and open **OpenIOTFlasher**.
-   - 1a (Optional but Easier) To put the adapter into Download mode. Pull the 3v3 wire out of the adapter and immediately plug it back in. Skip step 6 below        
+2. **(Optional but easier)** To put the chip into download mode, pull the 3V3 wire out of the adapter and immediately
+   plug it back in. If you do this, skip step 6 below.
 3. Select the adapter's **COM port** (from part B1).
 4. Select the platform **BK7231N** ("BK7231N (T2, T34, BL2028N)").
-5. Start a **backup (read only)**. If you skipped 1a then the adapter is waiting on download mode and the log shows **`Getting bus...`**: 
-6. **(SKIP IF YOU DID 1a)**Now reset the chip:**
+5. Start a **backup (read only)**. If you skipped step 2, the adapter is waiting on download mode and the log shows **`Getting bus...`**: 
+6. **(Skip if you did step 2.) Now reset the chip:**
    - **Tap the CEN lead to GND quickly.** This is finicky. It can take a few tries to get the timing right.
    - It should take about a second to see updates in the apps console if it worked, if not try again or:
    - **If CEN won't work:** pull the **3V3** lead out and put it back. OpenIOTFlasher will stop with an error saying
