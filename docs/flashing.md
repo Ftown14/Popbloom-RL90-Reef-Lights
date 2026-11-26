@@ -294,7 +294,8 @@ Strongly recommend to make two and check that they are identical proves the read
      up again until two match.
 4. If they match rename one after the light (e.g. `light-1-stock.bin`) and keep it somewhere safe.
    It may contain your old Tuya WiFi details, so don't share it.
-5. You do not need to do this step for anymore remaining lights. 
+5. For your remaining lights, one backup each is enough. Keep each light's backup with its number, because a backup
+   holds that light's own Tuya identity and only restores that light.
 
 ### E5. Flash the new firmware
 
